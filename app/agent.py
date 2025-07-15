@@ -25,7 +25,10 @@ logger = logging.getLogger(__name__)
 
 class WorkflowStage(Enum):
     THEME_DEFINITION = 1
-    SCRIPT_REFINEMENT = 2
+    RESEARCH = 2
+    SCRIPT_CREATION = 3
+    SCRIPT_APPROVAL = 4
+    ASSET_GENERATION = 5
 
 
 class YouTubeShortsCreatorAgent(BaseAgent):
@@ -36,9 +39,6 @@ class YouTubeShortsCreatorAgent(BaseAgent):
     researcher: Agent
     script_writer: Agent
     prompt_generator: Agent
-    workflow_stage: WorkflowStage = WorkflowStage.THEME_DEFINITION
-    theme_approved: bool = False
-    script_approved: bool = False
 
     model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
 
@@ -90,6 +90,29 @@ class YouTubeShortsCreatorAgent(BaseAgent):
 
         logger.info(f"[{self.name}] {agent.name} completed successfully.")
 
+    def _parse_json_response(self, raw_data, context=""):
+        """Parse JSON response, handling markdown wrapping."""
+        try:
+            if isinstance(raw_data, str):
+                json_str = raw_data.strip()
+                if json_str.startswith("```json"):
+                    json_str = json_str[7:]
+                if json_str.endswith("```"):
+                    json_str = json_str[:-3]
+                json_str = json_str.strip()
+                return json.loads(json_str)
+            else:
+                return raw_data
+        except (json.JSONDecodeError, AttributeError) as e:
+            logger.error(f"[{self.name}] JSON parsing failed for {context}: {e}, Raw data: {raw_data}")
+            return None
+
+    def _is_user_approval(self, user_input):
+        """Check if user input indicates approval."""
+        if not user_input:
+            return False
+        return user_input.lower().strip() in ["yes", "approve", "good", "perfect", "ok", "okay"]
+
     async def _define_theme_and_ask_for_feedback(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
@@ -101,35 +124,19 @@ class YouTubeShortsCreatorAgent(BaseAgent):
 
         theme_intent_raw = ctx.session.state.get(self.theme_definer.output_key)
         if theme_intent_raw:
-            try:
-                # Try to parse as JSON if it's a string
-                if isinstance(theme_intent_raw, str):
-                    # Handle markdown-wrapped JSON
-                    json_str = theme_intent_raw.strip()
-                    if json_str.startswith("```json"):
-                        json_str = json_str[7:]  # Remove ```json
-                    if json_str.endswith("```"):
-                        json_str = json_str[:-3]  # Remove ```
-                    json_str = json_str.strip()
-                    
-                    theme_intent = json.loads(json_str)
-                else:
-                    theme_intent = theme_intent_raw
-                
+            theme_intent = self._parse_json_response(theme_intent_raw, "theme")
+            if theme_intent:
                 theme = theme_intent.get("theme", "Unknown Theme")
                 intent = theme_intent.get("user_intent", "No intent specified")
-            except (json.JSONDecodeError, AttributeError) as e:
-                # Fallback if JSON parsing fails
-                logger.error(f"[{self.name}] JSON parsing failed: {e}, Raw data: {theme_intent_raw}")
-                theme = "Unknown Theme"
-                intent = str(theme_intent_raw) if theme_intent_raw else "No intent specified"
-            
-            yield text2event(
-                self.name,
-                f"I propose this theme: **{theme}**\n\n"
-                f"Intent: {intent}\n\n"
-                f"Does this look good to you? Type 'yes' to approve or provide feedback for changes."
-            )
+                
+                yield text2event(
+                    self.name,
+                    f"I propose this theme: **{theme}**\n\n"
+                    f"Intent: {intent}\n\n"
+                    f"Does this look good to you? Type 'yes' to approve or provide feedback for changes."
+                )
+            else:
+                yield text2event(self.name, "Sorry, I couldn't understand your request. Please try again.")
 
     async def _draft_script_and_ask_for_feedback(
         self, ctx: InvocationContext
@@ -155,28 +162,13 @@ class YouTubeShortsCreatorAgent(BaseAgent):
             yield text2event(self.name, "Error: No theme defined")
             return
 
-        try:
-            # Try to parse as JSON if it's a string
-            if isinstance(theme_intent_raw, str):
-                # Handle markdown-wrapped JSON
-                json_str = theme_intent_raw.strip()
-                if json_str.startswith("```json"):
-                    json_str = json_str[7:]  # Remove ```json
-                if json_str.endswith("```"):
-                    json_str = json_str[:-3]  # Remove ```
-                json_str = json_str.strip()
-                
-                theme_intent = json.loads(json_str)
-            else:
-                theme_intent = theme_intent_raw
-            
+        theme_intent = self._parse_json_response(theme_intent_raw, "theme setup")
+        if theme_intent:
             theme = theme_intent.get("theme", "default")
             intent = theme_intent.get("user_intent", "")
-        except (json.JSONDecodeError, AttributeError) as e:
-            # Fallback if JSON parsing fails
-            logger.error(f"[{self.name}] JSON parsing failed in setup_assets: {e}, Raw data: {theme_intent_raw}")
+        else:
             theme = "default"
-            intent = str(theme_intent_raw) if theme_intent_raw else ""
+            intent = ""
         
         assets_path = Path("projects") / theme.replace(" ", "_").lower()
         assets_path.mkdir(parents=True, exist_ok=True)
@@ -193,132 +185,101 @@ class YouTubeShortsCreatorAgent(BaseAgent):
         """Execute the main YouTube Shorts creation workflow."""
         logger.info(f"[{self.name}] Starting YouTube Shorts creation workflow.")
 
-        # Get workflow state from session or initialize
-        workflow_stage = ctx.session.state.get("workflow_stage", WorkflowStage.THEME_DEFINITION)
-        theme_approved = ctx.session.state.get("theme_approved", False)
-        script_approved = ctx.session.state.get("script_approved", False)
-        
-        logger.info(f"[{self.name}] Workflow state: {workflow_stage}, Theme approved: {theme_approved}, Script approved: {script_approved}")
+        # Get current workflow stage
+        current_stage = ctx.session.state.get("workflow_stage", WorkflowStage.THEME_DEFINITION)
+        logger.info(f"[{self.name}] Current workflow stage: {current_stage}")
 
-        if workflow_stage == WorkflowStage.THEME_DEFINITION:
-            if not theme_approved:
-                # Theme definition feedback loop
+        # Get the user's message from the current turn
+        user_message = ""
+        if hasattr(ctx, 'new_message') and ctx.new_message:
+            for part in ctx.new_message.parts:
+                if hasattr(part, 'text'):
+                    user_message += part.text
+
+        logger.info(f"[{self.name}] User message: '{user_message}'")
+
+        if current_stage == WorkflowStage.THEME_DEFINITION:
+            # Check if we have a theme defined
+            theme_intent = ctx.session.state.get(self.theme_definer.output_key)
+            
+            if not theme_intent:
+                # First time - define theme
                 async for event in self._define_theme_and_ask_for_feedback(ctx):
                     yield event
                 return
             else:
-                # Process user's feedback
-                async for event in self._run_sub_agent(self.user_feedback, ctx):
-                    yield event
-
-                user_feedback_raw = ctx.session.state.get(self.user_feedback.output_key, {})
-                try:
-                    # Try to parse as JSON if it's a string
-                    if isinstance(user_feedback_raw, str):
-                        # Handle markdown-wrapped JSON
-                        json_str = user_feedback_raw.strip()
-                        if json_str.startswith("```json"):
-                            json_str = json_str[7:]  # Remove ```json
-                        if json_str.endswith("```"):
-                            json_str = json_str[:-3]  # Remove ```
-                        json_str = json_str.strip()
-                        
-                        user_feedback = json.loads(json_str)
-                    else:
-                        user_feedback = user_feedback_raw
-                    
-                    user_input = user_feedback.get("user_input", "")
-                except (json.JSONDecodeError, AttributeError) as e:
-                    # Fallback if JSON parsing fails
-                    logger.error(f"[{self.name}] User feedback JSON parsing failed: {e}, Raw data: {user_feedback_raw}")
-                    user_input = str(user_feedback_raw) if user_feedback_raw else ""
-                
-                if user_input.lower() not in ["yes", "approve", "good", "perfect"]:
-                    # Theme not approved, keep iterating
-                    ctx.session.state["theme_approved"] = False
+                # Theme exists, check user response
+                if not user_message:
+                    # No user input yet, show theme again
                     async for event in self._define_theme_and_ask_for_feedback(ctx):
                         yield event
                     return
-                else:
-                    # Theme approved, move to script refinement
-                    ctx.session.state["theme_approved"] = True
-                    ctx.session.state["workflow_stage"] = WorkflowStage.SCRIPT_REFINEMENT
-                    yield text2event(self.name, "Theme approved! Moving to script creation...")
-
+                
+                # Process user feedback
+                if self._is_user_approval(user_message):
+                    # Theme approved, move to research
+                    ctx.session.state["workflow_stage"] = WorkflowStage.RESEARCH
+                    yield text2event(self.name, "Theme approved! Moving to research...")
+                    
                     async for event in self._setup_assets_folder(ctx):
                         yield event
-
-                    # Research phase
+                    
                     yield text2event(self.name, "Researching your topic...")
                     async for event in self._run_sub_agent(self.researcher, ctx):
                         yield event
-
-                    # Script creation feedback loop
+                    
+                    ctx.session.state["workflow_stage"] = WorkflowStage.SCRIPT_CREATION
                     yield text2event(self.name, "Research complete! Creating your script...")
                     async for event in self._draft_script_and_ask_for_feedback(ctx):
                         yield event
                     return
-
-        elif workflow_stage == WorkflowStage.SCRIPT_REFINEMENT:
-            if not script_approved:
-                # Script creation feedback loop
-                async for event in self._draft_script_and_ask_for_feedback(ctx):
-                    yield event
-                return
-            else:
-                # Process user's feedback
-                async for event in self._run_sub_agent(self.user_feedback, ctx):
-                    yield event
-
-            user_feedback_raw = ctx.session.state.get(self.user_feedback.output_key, {})
-            try:
-                # Try to parse as JSON if it's a string
-                if isinstance(user_feedback_raw, str):
-                    # Handle markdown-wrapped JSON
-                    json_str = user_feedback_raw.strip()
-                    if json_str.startswith("```json"):
-                        json_str = json_str[7:]  # Remove ```json
-                    if json_str.endswith("```"):
-                        json_str = json_str[:-3]  # Remove ```
-                    json_str = json_str.strip()
-                    
-                    user_feedback = json.loads(json_str)
                 else:
-                    user_feedback = user_feedback_raw
-                
-                user_input = user_feedback.get("user_input", "")
-            except (json.JSONDecodeError, AttributeError) as e:
-                # Fallback if JSON parsing fails
-                logger.error(f"[{self.name}] Script feedback JSON parsing failed: {e}, Raw data: {user_feedback_raw}")
-                user_input = str(user_feedback_raw) if user_feedback_raw else ""
+                    # Theme not approved, regenerate
+                    yield text2event(self.name, "I'll revise the theme based on your feedback...")
+                    # Clear the old theme to force regeneration
+                    ctx.session.state.pop(self.theme_definer.output_key, None)
+                    async for event in self._define_theme_and_ask_for_feedback(ctx):
+                        yield event
+                    return
 
-            if user_input.lower() not in ["yes", "approve", "good", "perfect"]:
-                # Script not approved, keep iterating
-                ctx.session.state["script_approved"] = False
+        elif current_stage == WorkflowStage.SCRIPT_CREATION:
+            # Script was just created, check user response
+            if not user_message:
+                # No user input yet, show script again
                 async for event in self._draft_script_and_ask_for_feedback(ctx):
                     yield event
                 return
-            else:
+            
+            # Process user feedback
+            if self._is_user_approval(user_message):
                 # Script approved, generate assets
-                ctx.session.state["script_approved"] = True
+                ctx.session.state["workflow_stage"] = WorkflowStage.ASSET_GENERATION
                 yield text2event(self.name, "Script approved! Generating your YouTube Short...")
-
-                # Generate image prompts
+                
                 yield text2event(self.name, "Creating visual prompts...")
                 async for event in self._run_sub_agent(self.prompt_generator, ctx):
                     yield event
-
-                # Generate images (run the custom agent manually)
+                
                 yield text2event(self.name, "Generating images...")
                 async for event in self.image_generator.run_async(ctx):
                     yield event
-
+                
                 yield text2event(
                     self.name,
                     f"YouTube Short creation complete! Check your project folder: {ctx.session.state.get('assets_path')}"
                 )
+                return
+            else:
+                # Script not approved, regenerate
+                yield text2event(self.name, "I'll revise the script based on your feedback...")
+                # Clear the old script to force regeneration
+                ctx.session.state.pop(self.script_writer.output_key, None)
+                async for event in self._draft_script_and_ask_for_feedback(ctx):
+                    yield event
+                return
 
-        return
+        # If we get here, something went wrong
+        yield text2event(self.name, "Something went wrong. Please start over with a new request.")
 
 
 # Create the main agent instance
