@@ -175,8 +175,15 @@ class YouTubeShortsCreatorAgent(BaseAgent):
         """Execute the main YouTube Shorts creation workflow."""
         logger.info(f"[{self.name}] Starting YouTube Shorts creation workflow.")
 
-        if self.workflow_stage == WorkflowStage.THEME_DEFINITION:
-            if not self.theme_approved:
+        # Get workflow state from session or initialize
+        workflow_stage = ctx.session.state.get("workflow_stage", WorkflowStage.THEME_DEFINITION)
+        theme_approved = ctx.session.state.get("theme_approved", False)
+        script_approved = ctx.session.state.get("script_approved", False)
+        
+        logger.info(f"[{self.name}] Workflow state: {workflow_stage}, Theme approved: {theme_approved}, Script approved: {script_approved}")
+
+        if workflow_stage == WorkflowStage.THEME_DEFINITION:
+            if not theme_approved:
                 # Theme definition feedback loop
                 async for event in self._define_theme_and_ask_for_feedback(ctx):
                     yield event
@@ -201,14 +208,14 @@ class YouTubeShortsCreatorAgent(BaseAgent):
                 
                 if user_input.lower() not in ["yes", "approve", "good", "perfect"]:
                     # Theme not approved, keep iterating
-                    self.theme_approved = False
+                    ctx.session.state["theme_approved"] = False
                     async for event in self._define_theme_and_ask_for_feedback(ctx):
                         yield event
                     return
                 else:
                     # Theme approved, move to script refinement
-                    self.theme_approved = True
-                    self.workflow_stage = WorkflowStage.SCRIPT_REFINEMENT
+                    ctx.session.state["theme_approved"] = True
+                    ctx.session.state["workflow_stage"] = WorkflowStage.SCRIPT_REFINEMENT
                     yield text2event(self.name, "Theme approved! Moving to script creation...")
 
                     async for event in self._setup_assets_folder(ctx):
@@ -225,10 +232,16 @@ class YouTubeShortsCreatorAgent(BaseAgent):
                         yield event
                     return
 
-        elif self.workflow_stage == WorkflowStage.SCRIPT_REFINEMENT:
-            # Process user's feedback
-            async for event in self._run_sub_agent(self.user_feedback, ctx):
-                yield event
+        elif workflow_stage == WorkflowStage.SCRIPT_REFINEMENT:
+            if not script_approved:
+                # Script creation feedback loop
+                async for event in self._draft_script_and_ask_for_feedback(ctx):
+                    yield event
+                return
+            else:
+                # Process user's feedback
+                async for event in self._run_sub_agent(self.user_feedback, ctx):
+                    yield event
 
             user_feedback_raw = ctx.session.state.get(self.user_feedback.output_key, {})
             try:
@@ -245,13 +258,13 @@ class YouTubeShortsCreatorAgent(BaseAgent):
 
             if user_input.lower() not in ["yes", "approve", "good", "perfect"]:
                 # Script not approved, keep iterating
-                self.script_approved = False
+                ctx.session.state["script_approved"] = False
                 async for event in self._draft_script_and_ask_for_feedback(ctx):
                     yield event
                 return
             else:
                 # Script approved, generate assets
-                self.script_approved = True
+                ctx.session.state["script_approved"] = True
                 yield text2event(self.name, "Script approved! Generating your YouTube Short...")
 
                 # Generate image prompts

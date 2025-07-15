@@ -102,10 +102,21 @@ class ImagenAgent(BaseAgent):
         logger.info(f"[{self.name}] Starting image generation")
 
         assets_path = Path(ctx.session.state.get("assets_path"))
-        prompts = ctx.session.state.get(self.input_key, {}).get(self.input_key, [])
+        prompts_raw = ctx.session.state.get(self.input_key)
+        
+        # Handle different prompt formats
+        if isinstance(prompts_raw, str):
+            # If it's a string, split by lines
+            prompts = [line.strip() for line in prompts_raw.split('\n') if line.strip()]
+        elif isinstance(prompts_raw, list):
+            prompts = prompts_raw
+        elif isinstance(prompts_raw, dict) and self.input_key in prompts_raw:
+            prompts = prompts_raw[self.input_key]
+        else:
+            prompts = []
 
         if not prompts:
-            error_msg = f"No image prompts found in session state"
+            error_msg = f"No image prompts found in session state. Raw data: {prompts_raw}"
             logger.error(f"[{self.name}] {error_msg}")
             yield text2event(self.name, error_msg)
             return
