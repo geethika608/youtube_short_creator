@@ -104,14 +104,23 @@ class YouTubeShortsCreatorAgent(BaseAgent):
             try:
                 # Try to parse as JSON if it's a string
                 if isinstance(theme_intent_raw, str):
-                    theme_intent = json.loads(theme_intent_raw)
+                    # Handle markdown-wrapped JSON
+                    json_str = theme_intent_raw.strip()
+                    if json_str.startswith("```json"):
+                        json_str = json_str[7:]  # Remove ```json
+                    if json_str.endswith("```"):
+                        json_str = json_str[:-3]  # Remove ```
+                    json_str = json_str.strip()
+                    
+                    theme_intent = json.loads(json_str)
                 else:
                     theme_intent = theme_intent_raw
                 
                 theme = theme_intent.get("theme", "Unknown Theme")
                 intent = theme_intent.get("user_intent", "No intent specified")
-            except (json.JSONDecodeError, AttributeError):
+            except (json.JSONDecodeError, AttributeError) as e:
                 # Fallback if JSON parsing fails
+                logger.error(f"[{self.name}] JSON parsing failed: {e}, Raw data: {theme_intent_raw}")
                 theme = "Unknown Theme"
                 intent = str(theme_intent_raw) if theme_intent_raw else "No intent specified"
             
@@ -149,14 +158,23 @@ class YouTubeShortsCreatorAgent(BaseAgent):
         try:
             # Try to parse as JSON if it's a string
             if isinstance(theme_intent_raw, str):
-                theme_intent = json.loads(theme_intent_raw)
+                # Handle markdown-wrapped JSON
+                json_str = theme_intent_raw.strip()
+                if json_str.startswith("```json"):
+                    json_str = json_str[7:]  # Remove ```json
+                if json_str.endswith("```"):
+                    json_str = json_str[:-3]  # Remove ```
+                json_str = json_str.strip()
+                
+                theme_intent = json.loads(json_str)
             else:
                 theme_intent = theme_intent_raw
             
             theme = theme_intent.get("theme", "default")
             intent = theme_intent.get("user_intent", "")
-        except (json.JSONDecodeError, AttributeError):
+        except (json.JSONDecodeError, AttributeError) as e:
             # Fallback if JSON parsing fails
+            logger.error(f"[{self.name}] JSON parsing failed in setup_assets: {e}, Raw data: {theme_intent_raw}")
             theme = "default"
             intent = str(theme_intent_raw) if theme_intent_raw else ""
         
@@ -197,13 +215,22 @@ class YouTubeShortsCreatorAgent(BaseAgent):
                 try:
                     # Try to parse as JSON if it's a string
                     if isinstance(user_feedback_raw, str):
-                        user_feedback = json.loads(user_feedback_raw)
+                        # Handle markdown-wrapped JSON
+                        json_str = user_feedback_raw.strip()
+                        if json_str.startswith("```json"):
+                            json_str = json_str[7:]  # Remove ```json
+                        if json_str.endswith("```"):
+                            json_str = json_str[:-3]  # Remove ```
+                        json_str = json_str.strip()
+                        
+                        user_feedback = json.loads(json_str)
                     else:
                         user_feedback = user_feedback_raw
                     
                     user_input = user_feedback.get("user_input", "")
-                except (json.JSONDecodeError, AttributeError):
+                except (json.JSONDecodeError, AttributeError) as e:
                     # Fallback if JSON parsing fails
+                    logger.error(f"[{self.name}] User feedback JSON parsing failed: {e}, Raw data: {user_feedback_raw}")
                     user_input = str(user_feedback_raw) if user_feedback_raw else ""
                 
                 if user_input.lower() not in ["yes", "approve", "good", "perfect"]:
@@ -247,13 +274,22 @@ class YouTubeShortsCreatorAgent(BaseAgent):
             try:
                 # Try to parse as JSON if it's a string
                 if isinstance(user_feedback_raw, str):
-                    user_feedback = json.loads(user_feedback_raw)
+                    # Handle markdown-wrapped JSON
+                    json_str = user_feedback_raw.strip()
+                    if json_str.startswith("```json"):
+                        json_str = json_str[7:]  # Remove ```json
+                    if json_str.endswith("```"):
+                        json_str = json_str[:-3]  # Remove ```
+                    json_str = json_str.strip()
+                    
+                    user_feedback = json.loads(json_str)
                 else:
                     user_feedback = user_feedback_raw
                 
                 user_input = user_feedback.get("user_input", "")
-            except (json.JSONDecodeError, AttributeError):
+            except (json.JSONDecodeError, AttributeError) as e:
                 # Fallback if JSON parsing fails
+                logger.error(f"[{self.name}] Script feedback JSON parsing failed: {e}, Raw data: {user_feedback_raw}")
                 user_input = str(user_feedback_raw) if user_feedback_raw else ""
 
             if user_input.lower() not in ["yes", "approve", "good", "perfect"]:
