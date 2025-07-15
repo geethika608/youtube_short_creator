@@ -27,8 +27,7 @@ class WorkflowStage(Enum):
     THEME_DEFINITION = 1
     RESEARCH = 2
     SCRIPT_CREATION = 3
-    SCRIPT_APPROVAL = 4
-    ASSET_GENERATION = 5
+    ASSET_GENERATION = 4
 
 
 class YouTubeShortsCreatorAgent(BaseAgent):
@@ -189,15 +188,6 @@ class YouTubeShortsCreatorAgent(BaseAgent):
         current_stage = ctx.session.state.get("workflow_stage", WorkflowStage.THEME_DEFINITION)
         logger.info(f"[{self.name}] Current workflow stage: {current_stage}")
 
-        # Get the user's message from the current turn
-        user_message = ""
-        if hasattr(ctx, 'new_message') and ctx.new_message:
-            for part in ctx.new_message.parts:
-                if hasattr(part, 'text'):
-                    user_message += part.text
-
-        logger.info(f"[{self.name}] User message: '{user_message}'")
-
         if current_stage == WorkflowStage.THEME_DEFINITION:
             # Check if we have a theme defined
             theme_intent = ctx.session.state.get(self.theme_definer.output_key)
@@ -208,75 +198,111 @@ class YouTubeShortsCreatorAgent(BaseAgent):
                     yield event
                 return
             else:
-                # Theme exists, check user response
-                if not user_message:
-                    # No user input yet, show theme again
-                    async for event in self._define_theme_and_ask_for_feedback(ctx):
-                        yield event
-                    return
+                # Theme exists, check if user has responded
+                user_responded = ctx.session.state.get("user_responded_to_theme", False)
                 
-                # Process user feedback
-                if self._is_user_approval(user_message):
-                    # Theme approved, move to research
-                    ctx.session.state["workflow_stage"] = WorkflowStage.RESEARCH
-                    yield text2event(self.name, "Theme approved! Moving to research...")
-                    
-                    async for event in self._setup_assets_folder(ctx):
+                if not user_responded:
+                    # Check if we have user input to process
+                    user_feedback_raw = ctx.session.state.get(self.user_feedback.output_key)
+                    if user_feedback_raw:
+                        # Process user feedback
+                        async for event in self._run_sub_agent(self.user_feedback, ctx):
+                            yield event
+                        
+                        # Extract user input from feedback
+                        user_feedback_data = self._parse_json_response(user_feedback_raw, "user feedback")
+                        if user_feedback_data:
+                            user_input = user_feedback_data.get("user_input", "")
+                            ctx.session.state["user_feedback"] = user_input
+                            ctx.session.state["user_responded_to_theme"] = True
+                            
+                            # Check if approved
+                            if self._is_user_approval(user_input):
+                                # Theme approved, move to research
+                                ctx.session.state["workflow_stage"] = WorkflowStage.RESEARCH
+                                yield text2event(self.name, "Theme approved! Moving to research...")
+                                
+                                async for event in self._setup_assets_folder(ctx):
+                                    yield event
+                                
+                                yield text2event(self.name, "Researching your topic...")
+                                async for event in self._run_sub_agent(self.researcher, ctx):
+                                    yield event
+                                
+                                ctx.session.state["workflow_stage"] = WorkflowStage.SCRIPT_CREATION
+                                yield text2event(self.name, "Research complete! Creating your script...")
+                                async for event in self._draft_script_and_ask_for_feedback(ctx):
+                                    yield event
+                                return
+                            else:
+                                # Theme not approved, regenerate
+                                yield text2event(self.name, "I'll revise the theme based on your feedback...")
+                                # Clear the old theme and reset state
+                                ctx.session.state.pop(self.theme_definer.output_key, None)
+                                ctx.session.state["user_responded_to_theme"] = False
+                                ctx.session.state["user_feedback"] = ""
+                                async for event in self._define_theme_and_ask_for_feedback(ctx):
+                                    yield event
+                                return
+                    else:
+                        # No user feedback yet, show theme again
+                        async for event in self._define_theme_and_ask_for_feedback(ctx):
+                            yield event
+                        return
+
+        elif current_stage == WorkflowStage.SCRIPT_CREATION:
+            # Check if user has responded to script
+            user_responded = ctx.session.state.get("user_responded_to_script", False)
+            
+            if not user_responded:
+                # Check if we have user input to process
+                user_feedback_raw = ctx.session.state.get(self.user_feedback.output_key)
+                if user_feedback_raw:
+                    # Process user feedback
+                    async for event in self._run_sub_agent(self.user_feedback, ctx):
                         yield event
                     
-                    yield text2event(self.name, "Researching your topic...")
-                    async for event in self._run_sub_agent(self.researcher, ctx):
-                        yield event
-                    
-                    ctx.session.state["workflow_stage"] = WorkflowStage.SCRIPT_CREATION
-                    yield text2event(self.name, "Research complete! Creating your script...")
+                    # Extract user input from feedback
+                    user_feedback_data = self._parse_json_response(user_feedback_raw, "user feedback")
+                    if user_feedback_data:
+                        user_input = user_feedback_data.get("user_input", "")
+                        ctx.session.state["user_feedback"] = user_input
+                        ctx.session.state["user_responded_to_script"] = True
+                        
+                        # Check if approved
+                        if self._is_user_approval(user_input):
+                            # Script approved, generate assets
+                            ctx.session.state["workflow_stage"] = WorkflowStage.ASSET_GENERATION
+                            yield text2event(self.name, "Script approved! Generating your YouTube Short...")
+                            
+                            yield text2event(self.name, "Creating visual prompts...")
+                            async for event in self._run_sub_agent(self.prompt_generator, ctx):
+                                yield event
+                            
+                            yield text2event(self.name, "Generating images...")
+                            async for event in self.image_generator.run_async(ctx):
+                                yield event
+                            
+                            yield text2event(
+                                self.name,
+                                f"YouTube Short creation complete! Check your project folder: {ctx.session.state.get('assets_path')}"
+                            )
+                            return
+                        else:
+                            # Script not approved, regenerate
+                            yield text2event(self.name, "I'll revise the script based on your feedback...")
+                            # Clear the old script and reset state
+                            ctx.session.state.pop(self.script_writer.output_key, None)
+                            ctx.session.state["user_responded_to_script"] = False
+                            ctx.session.state["user_feedback"] = ""
+                            async for event in self._draft_script_and_ask_for_feedback(ctx):
+                                yield event
+                            return
+                else:
+                    # No user feedback yet, show script again
                     async for event in self._draft_script_and_ask_for_feedback(ctx):
                         yield event
                     return
-                else:
-                    # Theme not approved, regenerate
-                    yield text2event(self.name, "I'll revise the theme based on your feedback...")
-                    # Clear the old theme to force regeneration
-                    ctx.session.state.pop(self.theme_definer.output_key, None)
-                    async for event in self._define_theme_and_ask_for_feedback(ctx):
-                        yield event
-                    return
-
-        elif current_stage == WorkflowStage.SCRIPT_CREATION:
-            # Script was just created, check user response
-            if not user_message:
-                # No user input yet, show script again
-                async for event in self._draft_script_and_ask_for_feedback(ctx):
-                    yield event
-                return
-            
-            # Process user feedback
-            if self._is_user_approval(user_message):
-                # Script approved, generate assets
-                ctx.session.state["workflow_stage"] = WorkflowStage.ASSET_GENERATION
-                yield text2event(self.name, "Script approved! Generating your YouTube Short...")
-                
-                yield text2event(self.name, "Creating visual prompts...")
-                async for event in self._run_sub_agent(self.prompt_generator, ctx):
-                    yield event
-                
-                yield text2event(self.name, "Generating images...")
-                async for event in self.image_generator.run_async(ctx):
-                    yield event
-                
-                yield text2event(
-                    self.name,
-                    f"YouTube Short creation complete! Check your project folder: {ctx.session.state.get('assets_path')}"
-                )
-                return
-            else:
-                # Script not approved, regenerate
-                yield text2event(self.name, "I'll revise the script based on your feedback...")
-                # Clear the old script to force regeneration
-                ctx.session.state.pop(self.script_writer.output_key, None)
-                async for event in self._draft_script_and_ask_for_feedback(ctx):
-                    yield event
-                return
 
         # If we get here, something went wrong
         yield text2event(self.name, "Something went wrong. Please start over with a new request.")
