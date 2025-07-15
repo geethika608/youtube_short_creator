@@ -207,6 +207,7 @@ class YouTubeShortsCreatorAgent(BaseAgent):
                     return
                 else:
                     # Theme approved, move to script refinement
+                    self.theme_approved = True
                     self.workflow_stage = WorkflowStage.SCRIPT_REFINEMENT
                     yield text2event(self.name, "Theme approved! Moving to script creation...")
 
@@ -250,6 +251,7 @@ class YouTubeShortsCreatorAgent(BaseAgent):
                 return
             else:
                 # Script approved, generate assets
+                self.script_approved = True
                 yield text2event(self.name, "Script approved! Generating your YouTube Short...")
 
                 # Generate image prompts

@@ -47,13 +47,19 @@ class ImagenAgent(BaseAgent):
     def __init__(self, **kwargs: Any):
         """Initialize the ImagenAgent."""
         super().__init__(**kwargs)
-        self.client = get_client()
+        self.client = None  # Initialize lazily
         self.image_gen_config = {
             "number_of_images": 1,
             "output_mime_type": "image/jpeg",
             "person_generation": "ALLOW_ADULT",
             "aspect_ratio": self.aspect_ratio,
         }
+    
+    def _get_client(self):
+        """Get the client, initializing it if necessary."""
+        if self.client is None:
+            self.client = get_client()
+        return self.client
 
     async def _generate_image(
         self, scene_idx: int, prompt: str, output_dir: Path
@@ -63,7 +69,8 @@ class ImagenAgent(BaseAgent):
         yield text2event(self.name, f"Generating image for scene {scene_idx + 1}...")
 
         try:
-            result = self.client.models.generate_images(
+            client = self._get_client()
+            result = client.models.generate_images(
                 model=self.model, prompt=prompt, config=self.image_gen_config
             )
 
