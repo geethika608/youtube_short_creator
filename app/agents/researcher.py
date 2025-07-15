@@ -1,7 +1,5 @@
 from google.adk.agents import Agent
 
-from app.callbacks.callbacks import save_agent_output
-
 MODEL_ID = "gemini-2.5-flash"
 RESEARCHER_PROMPT = """
 # Role
@@ -30,5 +28,4 @@ researcher_agent = Agent(
     instruction=RESEARCHER_PROMPT,
     model=MODEL_ID,
     output_key="research_report",
-    after_agent_callback=save_agent_output,
 ) 

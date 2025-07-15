@@ -1,7 +1,4 @@
 from google.adk.agents import Agent
-from pydantic import BaseModel, Field
-
-from app.callbacks.callbacks import save_agent_output
 
 MODEL_ID = "gemini-2.5-flash"
 USER_FEEDBACK_PROMPT = """
@@ -45,17 +42,10 @@ Output:
 """
 
 
-class UserFeedbackAgentOutput(BaseModel):
-    user_input: str = Field(description="The user's feedback response")
-    approved: bool = Field(description="Whether the user approved the content")
-    changes_requested: str = Field(description="Any specific changes the user wants")
-
-
 user_feedback_agent = Agent(
     name="UserFeedbackAgent",
     description="Processes user feedback for content approval",
     instruction=USER_FEEDBACK_PROMPT,
     model=MODEL_ID,
     output_key="user_feedback",
-    after_agent_callback=save_agent_output,
 ) 
