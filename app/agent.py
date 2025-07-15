@@ -1,3 +1,4 @@
+import json
 import logging
 from enum import Enum
 from pathlib import Path
@@ -100,10 +101,21 @@ class YouTubeShortsCreatorAgent(BaseAgent):
         async for event in self._run_sub_agent(self.theme_definer, ctx):
             yield event
 
-        theme_intent = ctx.session.state.get(self.theme_definer.output_key)
-        if theme_intent:
-            theme = theme_intent.get("theme", "Unknown Theme")
-            intent = theme_intent.get("user_intent", "No intent specified")
+        theme_intent_raw = ctx.session.state.get(self.theme_definer.output_key)
+        if theme_intent_raw:
+            try:
+                # Try to parse as JSON if it's a string
+                if isinstance(theme_intent_raw, str):
+                    theme_intent = json.loads(theme_intent_raw)
+                else:
+                    theme_intent = theme_intent_raw
+                
+                theme = theme_intent.get("theme", "Unknown Theme")
+                intent = theme_intent.get("user_intent", "No intent specified")
+            except (json.JSONDecodeError, AttributeError):
+                # Fallback if JSON parsing fails
+                theme = "Unknown Theme"
+                intent = str(theme_intent_raw) if theme_intent_raw else "No intent specified"
             
             yield text2event(
                 self.name,
@@ -131,17 +143,30 @@ class YouTubeShortsCreatorAgent(BaseAgent):
 
     async def _setup_assets_folder(self, ctx: InvocationContext) -> AsyncGenerator[Event, None]:
         """Set up the assets folder for the project."""
-        theme_intent = ctx.session.state.get(self.theme_definer.output_key)
-        if not theme_intent:
+        theme_intent_raw = ctx.session.state.get(self.theme_definer.output_key)
+        if not theme_intent_raw:
             yield text2event(self.name, "Error: No theme defined")
             return
 
-        theme = theme_intent.get("theme", "default")
+        try:
+            # Try to parse as JSON if it's a string
+            if isinstance(theme_intent_raw, str):
+                theme_intent = json.loads(theme_intent_raw)
+            else:
+                theme_intent = theme_intent_raw
+            
+            theme = theme_intent.get("theme", "default")
+            intent = theme_intent.get("user_intent", "")
+        except (json.JSONDecodeError, AttributeError):
+            # Fallback if JSON parsing fails
+            theme = "default"
+            intent = str(theme_intent_raw) if theme_intent_raw else ""
+        
         assets_path = Path("projects") / theme.replace(" ", "_").lower()
         assets_path.mkdir(parents=True, exist_ok=True)
         
         ctx.session.state["assets_path"] = str(assets_path)
-        ctx.session.state["intent"] = theme_intent.get("user_intent", "")
+        ctx.session.state["intent"] = intent
 
         yield text2event(self.name, f"Project folder created: {assets_path}")
 
@@ -163,7 +188,18 @@ class YouTubeShortsCreatorAgent(BaseAgent):
                 async for event in self._run_sub_agent(self.user_feedback, ctx):
                     yield event
 
-                user_input = ctx.session.state.get(self.user_feedback.output_key, {}).get("user_input", "")
+                user_feedback_raw = ctx.session.state.get(self.user_feedback.output_key, {})
+                try:
+                    # Try to parse as JSON if it's a string
+                    if isinstance(user_feedback_raw, str):
+                        user_feedback = json.loads(user_feedback_raw)
+                    else:
+                        user_feedback = user_feedback_raw
+                    
+                    user_input = user_feedback.get("user_input", "")
+                except (json.JSONDecodeError, AttributeError):
+                    # Fallback if JSON parsing fails
+                    user_input = str(user_feedback_raw) if user_feedback_raw else ""
                 
                 if user_input.lower() not in ["yes", "approve", "good", "perfect"]:
                     # Theme not approved, keep iterating
@@ -195,7 +231,18 @@ class YouTubeShortsCreatorAgent(BaseAgent):
             async for event in self._run_sub_agent(self.user_feedback, ctx):
                 yield event
 
-            user_input = ctx.session.state.get(self.user_feedback.output_key, {}).get("user_input", "")
+            user_feedback_raw = ctx.session.state.get(self.user_feedback.output_key, {})
+            try:
+                # Try to parse as JSON if it's a string
+                if isinstance(user_feedback_raw, str):
+                    user_feedback = json.loads(user_feedback_raw)
+                else:
+                    user_feedback = user_feedback_raw
+                
+                user_input = user_feedback.get("user_input", "")
+            except (json.JSONDecodeError, AttributeError):
+                # Fallback if JSON parsing fails
+                user_input = str(user_feedback_raw) if user_feedback_raw else ""
 
             if user_input.lower() not in ["yes", "approve", "good", "perfect"]:
                 # Script not approved, keep iterating

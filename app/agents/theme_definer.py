@@ -13,16 +13,26 @@ Analyze the user's request and create:
 1. A concise theme (1-3 words)
 2. A detailed user intent that captures their vision
 
+# Output Format
+Return your response as a JSON object with exactly this structure:
+{
+  "theme": "Your theme here (1-3 words)",
+  "user_intent": "Detailed description of what the user wants"
+}
+
 # Example
 User: "I want a video about cooking pasta"
 Output: 
-- Theme: "Pasta Cooking"
-- Intent: "Create an engaging YouTube Short about cooking pasta, showing quick tips and techniques that viewers can easily follow"
+{
+  "theme": "Pasta Cooking",
+  "user_intent": "Create an engaging YouTube Short about cooking pasta, showing quick tips and techniques that viewers can easily follow"
+}
 
 # Constraints
 - Theme must be 1-3 words
 - Intent should be comprehensive and specific
 - Focus on YouTube Shorts format (vertical, engaging, under 60 seconds)
+- Always return valid JSON
 """
 
 
@@ -37,6 +47,5 @@ theme_definer_agent = Agent(
     instruction=THEME_DEFINER_PROMPT,
     model=MODEL_ID,
     output_key="theme_intent",
-    output_schema=ThemeDefinerAgentOutput,
     after_agent_callback=save_agent_output,
 ) 
