@@ -36,12 +36,11 @@ class YouTubeShortsCreatorAgent(BaseAgent):
     researcher: Agent
     script_writer: Agent
     prompt_generator: Agent
-    image_generator: Agent
     workflow_stage: WorkflowStage = WorkflowStage.THEME_DEFINITION
     theme_approved: bool = False
     script_approved: bool = False
 
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = {"arbitrary_types_allowed": True, "extra": "allow"}
 
     def __init__(
         self,
@@ -51,7 +50,6 @@ class YouTubeShortsCreatorAgent(BaseAgent):
         researcher: Agent,
         script_writer: Agent,
         prompt_generator: Agent,
-        image_generator: Agent,
     ):
         """Initialize the YouTube Shorts Creator Agent."""
         sub_agents_list = [
@@ -60,7 +58,6 @@ class YouTubeShortsCreatorAgent(BaseAgent):
             researcher,
             script_writer,
             prompt_generator,
-            image_generator,
         ]
 
         super().__init__(
@@ -70,9 +67,10 @@ class YouTubeShortsCreatorAgent(BaseAgent):
             researcher=researcher,
             script_writer=script_writer,
             prompt_generator=prompt_generator,
-            image_generator=image_generator,
             sub_agents=sub_agents_list,
         )
+        # Instantiate the image generator as a regular attribute
+        self.image_generator = image_generator_agent
 
     async def _run_sub_agent(
         self, agent: BaseAgent, ctx: InvocationContext
@@ -259,9 +257,9 @@ class YouTubeShortsCreatorAgent(BaseAgent):
                 async for event in self._run_sub_agent(self.prompt_generator, ctx):
                     yield event
 
-                # Generate images
+                # Generate images (run the custom agent manually)
                 yield text2event(self.name, "Generating images...")
-                async for event in self._run_sub_agent(self.image_generator, ctx):
+                async for event in self.image_generator.run_async(ctx):
                     yield event
 
                 yield text2event(
@@ -280,7 +278,6 @@ youtube_shorts_creator_agent = YouTubeShortsCreatorAgent(
     researcher=researcher_agent,
     script_writer=script_writer_agent,
     prompt_generator=prompt_generator_agent,
-    image_generator=image_generator_agent,
 )
 
 root_agent = youtube_shorts_creator_agent 

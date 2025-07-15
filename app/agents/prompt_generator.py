@@ -1,5 +1,7 @@
 from google.adk.agents import Agent
 
+from app.callbacks.callbacks import save_agent_output
+
 MODEL_ID = "gemini-2.5-flash"
 PROMPT_GENERATOR_PROMPT = """
 # Role
@@ -36,4 +38,5 @@ prompt_generator_agent = Agent(
     instruction=PROMPT_GENERATOR_PROMPT,
     model=MODEL_ID,
     output_key="image_prompts",
+    after_agent_callback=save_agent_output,
 ) 

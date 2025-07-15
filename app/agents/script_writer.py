@@ -1,5 +1,7 @@
 from google.adk.agents import Agent
 
+from app.callbacks.callbacks import save_agent_output
+
 MODEL_ID = "gemini-2.5-flash"
 SCRIPT_WRITER_PROMPT = """
 # Role
@@ -37,4 +39,5 @@ script_writer_agent = Agent(
     instruction=SCRIPT_WRITER_PROMPT,
     model=MODEL_ID,
     output_key="script",
+    after_agent_callback=save_agent_output,
 ) 
